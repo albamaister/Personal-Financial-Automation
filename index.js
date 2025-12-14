@@ -18,7 +18,7 @@ function runExpenseAgent() {
   }
   const label = GmailApp.getUserLabelByName(PROCESSED_LABEL);
 
-  // --- READ EXISTING IDs TO AVOID DUPLICATES ---
+  // --- LEER IDs EXISTENTES ---
   const lastRowCheck = sheet.getLastRow();
   let existingIds = [];
   if (lastRowCheck > 1) {
@@ -39,6 +39,7 @@ function runExpenseAgent() {
 
   for (const thread of threads) {
     const messages = thread.getMessages();
+    let threadSuccess = true;
 
     for (const msg of messages) {
       if (existingIds.includes(msg.getId())) {
@@ -53,7 +54,6 @@ function runExpenseAgent() {
       // 3. Call the Agent (Gemini)
       try {
         const expenseData = extractDataWithGemini(body, subject, date);
-
         if (expenseData) {
           // 4. Save to Sheets
           sheet.appendRow([
@@ -77,11 +77,17 @@ function runExpenseAgent() {
         Utilities.sleep(10000);
       } catch (e) {
         console.error(`Error processing message ${msg.getId()}: ${e.message}`);
+        threadSuccess = false;
+        break;
       }
     }
 
-    // 5. Mark thread as processed
-    thread.addLabel(label);
+    // 5. Mark thread as processed (ONLY IF NO ERRORS)
+    if (threadSuccess) {
+      thread.addLabel(label);
+    } else {
+      console.warn("Thread skipped due to errors. Will retry next run.");
+    }
   }
 
   // 6. Sort Data
@@ -202,7 +208,9 @@ function extractDataWithGemini(emailBody, subject, emailDate) {
   const jsonResponse = JSON.parse(response.getContentText());
 
   if (!jsonResponse.candidates || jsonResponse.candidates.length === 0) {
-    throw new Error("Gemini did not return any results (Candidates array empty).");
+    throw new Error(
+      "Gemini did not return any results (Candidates array empty)."
+    );
   }
 
   let rawText = jsonResponse.candidates[0].content.parts[0].text;

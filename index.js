@@ -72,12 +72,13 @@ function runExpenseAgent() {
 
           existingIds.push(msg.getId());
         }
-
-        // Security pause (10 seconds to avoid error 429)
-        Utilities.sleep(10000);
       } catch (e) {
         console.error(`Error processing message ${msg.getId()}: ${e.message}`);
         threadSuccess = false;
+      }
+      // Security pause (10 seconds to avoid error 429)
+      Utilities.sleep(4500);
+      if (!threadSuccess) {
         break;
       }
     }
@@ -124,7 +125,7 @@ function runExpenseAgent() {
 }
 
 function extractDataWithGemini(emailBody, subject, emailDate) {
-  const model = "gemini-2.5-flash-lite";
+  const model = "gemini-2.5-flash";
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
 

@@ -76,8 +76,8 @@ function runExpenseAgent() {
         console.error(`Error processing message ${msg.getId()}: ${e.message}`);
         threadSuccess = false;
       }
-      // Security pause (10 seconds to avoid error 429)
-      Utilities.sleep(4500);
+      // Security pause (12 seconds to avoid error 429)
+      Utilities.sleep(12000);
       if (!threadSuccess) {
         break;
       }
@@ -231,6 +231,10 @@ function createDashboard() {
   let dashSheet = ss.getSheetByName("Dashboard");
   if (dashSheet) {
     dashSheet.clear();
+    const existingCharts = dashSheet.getCharts();
+    for (let i = 0; i < existingCharts.length; i++) {
+      dashSheet.removeChart(existingCharts[i]);
+    }
   } else {
     dashSheet = ss.insertSheet("Dashboard");
   }
@@ -245,16 +249,21 @@ function createDashboard() {
     .setFontWeight("bold");
   dashSheet
     .getRange("B4")
-    .setValue("Filter by Month:")
+    .setValue("Filter by Year:")
     .setFontWeight("bold")
     .setFontColor("#666");
   dashSheet
     .getRange("D4")
-    .setValue("Filter by Category:")
+    .setValue("Filter by Month:")
     .setFontWeight("bold")
     .setFontColor("#666");
   dashSheet
     .getRange("F4")
+    .setValue("Filter by Category:")
+    .setFontWeight("bold")
+    .setFontColor("#666");
+  dashSheet
+    .getRange("H4")
     .setValue("TOTAL SPENT:")
     .setFontWeight("bold")
     .setFontColor("#666");
@@ -264,13 +273,21 @@ function createDashboard() {
   if (lastRow < 2) return;
   const dataValues = dataSheet.getRange(2, 1, lastRow - 1, 3).getValues();
 
-  // Unique Categories (+ 'ALL')
-  const categories = [...new Set(dataValues.map((r) => r[2]))]
+  // Unique Years (+ 'ALL')
+  const years = [
+    ...new Set(
+      dataValues.map((r) => {
+        const d = new Date(r[0]);
+        return isNaN(d) ? "" : `${d.getFullYear()}`;
+      })
+    ),
+  ]
     .filter(String)
-    .sort();
-  if (!categories.includes("ALL")) categories.unshift("ALL");
+    .sort()
+    .reverse();
+  if (!years.includes("ALL")) years.unshift("ALL");
 
-  // Uniques Months (+ 'ALL')
+  // Unique Months (+ 'ALL')
   const months = [
     ...new Set(
       dataValues.map((r) => {
@@ -286,8 +303,23 @@ function createDashboard() {
     .reverse();
   if (!months.includes("ALL")) months.unshift("ALL");
 
+  // Unique Categories (+ 'ALL')
+  const categories = [...new Set(dataValues.map((r) => r[2]))]
+    .filter(String)
+    .sort();
+  if (!categories.includes("ALL")) categories.unshift("ALL");
+
   // 4. DROPDOWNS
-  const cellMonth = dashSheet.getRange("B5");
+  const cellYear = dashSheet.getRange("B5");
+  cellYear.clearDataValidations();
+  cellYear.setNumberFormat("@").setBackground("#D9EAD3").setValue("ALL");
+  const ruleYears = SpreadsheetApp.newDataValidation()
+    .requireValueInList(years, true)
+    .setAllowInvalid(false)
+    .build();
+  cellYear.setDataValidation(ruleYears);
+
+  const cellMonth = dashSheet.getRange("D5");
   cellMonth.clearDataValidations();
   cellMonth.setNumberFormat("@").setBackground("#FFF2CC").setValue("ALL");
   const ruleMonths = SpreadsheetApp.newDataValidation()
@@ -296,7 +328,7 @@ function createDashboard() {
     .build();
   cellMonth.setDataValidation(ruleMonths);
 
-  const cellCat = dashSheet.getRange("D5");
+  const cellCat = dashSheet.getRange("F5");
   cellCat.clearDataValidations();
   cellCat.setNumberFormat("@").setBackground("#E2F0CB").setValue("ALL");
   const ruleCats = SpreadsheetApp.newDataValidation()
@@ -305,10 +337,10 @@ function createDashboard() {
     .build();
   cellCat.setDataValidation(ruleCats);
 
-  // 5. SUM OF TOTALS (Dynamic)
-  dashSheet.getRange("F5").setFormula("=SUM(D9:D)");
+  // 5. SUM OF TOTALS
+  dashSheet.getRange("H5").setFormula("=SUM(D9:D)");
   dashSheet
-    .getRange("F5")
+    .getRange("H5")
     .setNumberFormat("$#,##0.00")
     .setFontSize(14)
     .setFontWeight("bold");
@@ -316,8 +348,9 @@ function createDashboard() {
   // FILTER LOGIC (WHERE CLAUSE)
   const whereClause = `
     WHERE D IS NOT NULL 
-    " & IF(OR(B5="", B5="ALL"), "", " AND year(A) = " & LEFT(B5,4) & " AND month(A) = " & (RIGHT(B5,2)-1) ) & "
-    " & IF(OR(D5="", D5="ALL"), "", " AND C = '" & D5 & "' ") & "
+    " & IF(OR(B5="", B5="ALL"), "", " AND year(A) = " & B5 ) & "
+    " & IF(OR(D5="", D5="ALL"), "", " AND year(A) = " & LEFT(D5,4) & " AND month(A) = " & (RIGHT(D5,2)-1) ) & "
+    " & IF(OR(F5="", F5="ALL"), "", " AND C = '" & F5 & "' ") & "
   `;
 
   // 6. MAIN TABLE
@@ -338,32 +371,35 @@ function createDashboard() {
 
   // 7. AUXILIARY CHART TABLE
   const chartQuery = `=QUERY(Expenses!A:E, "SELECT C, SUM(D) ${whereClause} GROUP BY C LABEL C 'Category', SUM(D) 'Amount'", 1)`;
-  dashSheet.getRange("H8").setFormula(chartQuery);
+  dashSheet.getRange("K8").setFormula(chartQuery);
 
   dashSheet
-    .getRange("H8:I8")
+    .getRange("K8:L8")
     .setBackground("#34A853")
     .setFontColor("white")
     .setFontWeight("bold");
-  dashSheet.getRange("I:I").setNumberFormat("$#,##0.00");
+  dashSheet.getRange("L:L").setNumberFormat("$#,##0.00");
+
+  SpreadsheetApp.flush();
 
   // 8. BAR CHART
-  const chartRange = dashSheet.getRange("H8:I20");
+  const chartRange = dashSheet.getRange("K8:L20");
 
   const barChart = dashSheet
     .newChart()
     .setChartType(Charts.ChartType.BAR)
     .addRange(chartRange)
-    .setPosition(2, 8, 0, 0)
+    .setPosition(2, 11, 0, 0)
     .setOption("title", "Spending Analysis")
     .setOption("legend", { position: "none" })
     .setOption("hAxis", { format: "$#,##0" })
     .setOption("width", 600)
     .setOption("height", 350)
     .setOption("colors", ["#4285F4"])
+    .setOption("useFirstRowAsHeaders", true)
     .build();
 
   dashSheet.insertChart(barChart);
 
-  console.log("Dashboard UI Updated: Added 'ALL' options.");
+  console.log("Dashboard UI Updated: Added 'Year' filter.");
 }
